@@ -125,7 +125,13 @@ static Record* to_score_records(ExecutionCtx* rctx, Record *data, void* arg){
 static int heap_cmp(const void *a, const void *b, const void *udata){
     ScoreRecord* s1 = (ScoreRecord*)a;
     ScoreRecord* s2 = (ScoreRecord*)b;
-    return s2->score - s1->score;
+    if(s1->score > s2->score){
+        return -1;
+    }else if(s1->score > s2->score){
+        return 1;
+    }else {
+        return 0;
+    }
 }
 
 static Record* top_k(ExecutionCtx* rctx, Record *accumulate, Record *r, void* arg){
