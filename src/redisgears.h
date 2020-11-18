@@ -10,6 +10,7 @@
 
 #include <stdbool.h>
 #include "redismodule.h"
+#include "arr_rm_alloc.h"
 
 #define ID_LEN REDISMODULE_NODE_ID_LEN + sizeof(long long) + 1 // the +1 is for the \0
 #define STR_ID_LEN  REDISMODULE_NODE_ID_LEN + 13

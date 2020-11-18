@@ -3,17 +3,43 @@
 #include "minmax_heap.h"
 #include <math.h>
 #include "redisgears_memory.h"
+#include <cblas.h>
 
 static RecordType* tensorRecordType = NULL;
 static RecordType* ScoreRecordType = NULL;
 static RecordType* HeapRecordType = NULL;
 
-static bool RedisAI_Initialized = false;
+#define VEC_SIZE 128
 
-typedef struct DistArg{
+typedef struct Vec{
+    RedisModuleString* keyName;
+    float denom;
+    float vec[VEC_SIZE];
+}Vec;
+
+#define VEC_HOLDER_SIZE 512
+
+typedef struct VecsHolder{
     size_t size;
-    float* data;
-}DistArg;
+    size_t vecListPos;
+    Vec vectors[VEC_HOLDER_SIZE];
+}VecsHolder;
+
+
+VecsHolder** vecList = NULL;
+RedisModuleType *vecRedisDT;
+
+typedef struct VecDT{
+    size_t index;
+    VecsHolder* holder;
+}VecDT;
+
+typedef struct VecReaderCtx{
+    size_t index;
+    Record** pendings;
+    float vec[VEC_SIZE];
+    float denom_vec;
+}VecReaderCtx;
 
 typedef struct TopKArg{
     size_t topK;
@@ -21,13 +47,13 @@ typedef struct TopKArg{
 
 typedef struct TensorRecord{
     Record baseRecord;
-    char* key;
+    RedisModuleString* key;
     RAI_Tensor* tensor;
 }TensorRecord;
 
 typedef struct ScoreRecord{
     Record baseRecord;
-    char* key;
+    RedisModuleString* key;
     double score;
 }ScoreRecord;
 
@@ -36,74 +62,26 @@ typedef struct HeapRecord{
     heap_t* heap;
 }HeapRecord;
 
-static Record* read_vector(RedisModuleCtx* rctx, RedisModuleString* key, RedisModuleKey* keyPtr, bool readValue, const char* event){
-    TensorRecord* t = (TensorRecord*)RedisGears_RecordCreate(tensorRecordType);
-    const char* keyStr = RedisModule_StringPtrLen(key, NULL);
-    t->key = RG_STRDUP(keyStr);
-    t->tensor = NULL;
-
-    if(!keyPtr){
-        RedisModule_Log(rctx, "warning", "Got NULL key pointer");
-        return &(t->baseRecord);
+static VecReaderCtx* VecReaderCtx_Create(float* data){
+    VecReaderCtx* ctx = RG_ALLOC(sizeof(*ctx));
+    ctx->index = 0;
+    ctx->pendings = array_new(Record*, 10);
+    if(data){
+        memcpy(ctx->vec, data, VEC_SIZE * sizeof(*data));
+        ctx->denom_vec = cblas_snrm2(VEC_SIZE, ctx->vec, 1);
     }
-
-    if(RedisModule_KeyType(keyPtr) != REDISMODULE_KEYTYPE_MODULE){
-        RedisModule_Log(rctx, "warning", "Got none module key");
-        return &(t->baseRecord);
-    }
-
-    if(RedisModule_ModuleTypeGetType(keyPtr) != RedisAI_TensorRedisType()){
-        RedisModule_Log(rctx, "warning", "Got none RedisAI tensor key");
-        return &(t->baseRecord);
-    }
-
-    t->tensor = RedisModule_ModuleTypeGetValue(keyPtr);
-    t->tensor = RedisAI_TensorGetShallowCopy(t->tensor);
-
-    return &(t->baseRecord);
+    return ctx;
 }
 
-static Record* calculate_dist(ExecutionCtx* rctx, Record *data, void* arg){
-    DistArg* blob = arg;
-    size_t b1Len = blob->size;
-    float* b1 = blob->data;
-    TensorRecord* t = (TensorRecord*)data;
-    if(t->tensor == NULL){
-        RedisGears_SetError(rctx, RG_STRDUP("not a tensor key"));
-        return NULL;
-    }
-    size_t b2Len = RedisAI_TensorLength(t->tensor);
-    float* b2 = (float*)RedisAI_TensorData(t->tensor);
-
-    if(b2Len != b1Len){
-        RedisGears_SetError(rctx, RG_STRDUP("vector sized missmatch"));
-        return NULL;
+static void VecReaderCtx_Free(VecReaderCtx* ctx){
+    for(size_t i = 0 ; i < array_len(ctx->pendings) ; ++i){
+        Record* r = ctx->pendings[i];
+        RedisGears_FreeRecord(r);
     }
 
-//    float denom_a = cblas_snrm2(b1Len, b1, 1);
-//    float denom_b = cblas_snrm2(b2Len, b2, 1);
-//    float dot = cblas_dsdot(b1Len, b1, 1, b2, 1);
-//
-//    double score = dot / (sqrt(denom_a) * sqrt(denom_b)) ;
+    array_free(ctx->pendings);
 
-    double dot = 0.0, denom_a = 0.0, denom_b = 0.0 ;
-    for(unsigned int i = 0u; i < b2Len; ++i) {
-        dot += b1[i] * b2[i] ;
-        denom_a += b1[i] * b1[i] ;
-        denom_b += b2[i] * b2[i] ;
-    }
-
-    double score = dot / (sqrt(denom_a) * sqrt(denom_b)) ;
-
-    ScoreRecord* s = (ScoreRecord*)RedisGears_RecordCreate(ScoreRecordType);
-    s->key = t->key;
-    s->score = score;
-
-    t->key = NULL;
-
-    RedisGears_FreeRecord(&(t->baseRecord));
-
-    return &(s->baseRecord);;
+    RG_FREE(ctx);
 }
 
 static Record* to_score_records(ExecutionCtx* rctx, Record *data, void* arg){
@@ -125,7 +103,7 @@ static Record* to_score_records(ExecutionCtx* rctx, Record *data, void* arg){
 static int heap_cmp(const void *a, const void *b, const void *udata){
     ScoreRecord* s1 = (ScoreRecord*)a;
     ScoreRecord* s2 = (ScoreRecord*)b;
-    if(s1->score > s2->score){
+    if(s1->score < s2->score){
         return -1;
     }else if(s1->score > s2->score){
         return 1;
@@ -155,7 +133,7 @@ static Record* top_k(ExecutionCtx* rctx, Record *accumulate, Record *r, void* ar
     } else {
         // find the min result
         ScoreRecord* sr = mmh_peek_min(h);
-        if(sr->score > currSr->score){
+        if(sr->score < currSr->score){
             void* temp = mmh_pop_min(h);
             RedisModule_Assert(temp == sr);
             RedisGears_FreeRecord(&(sr->baseRecord));
@@ -178,22 +156,76 @@ static void on_done(ExecutionPlan* ctx, void* privateData){
 }
 
 /*
+ * rg.vec_add <k> <blob>
+ */
+int vec_add(RedisModuleCtx *ctx, RedisModuleString **argv, int argc){
+    if(argc != 3){
+        return RedisModule_WrongArity(ctx);
+    }
+
+    size_t dataLen;
+    float* data = (float*)RedisModule_StringPtrLen(argv[2], &dataLen);
+    if(dataLen != (VEC_SIZE * sizeof(float))){
+        RedisModule_ReplyWithError(ctx, "Given blob is not float vector of size 128");
+        return REDISMODULE_OK;
+    }
+
+    RedisModuleKey *kp = RedisModule_OpenKey(ctx, argv[1], REDISMODULE_WRITE);
+    if(RedisModule_KeyType(kp) != REDISMODULE_KEYTYPE_EMPTY){
+        RedisModule_ReplyWithError(ctx, "Key is not empty");
+        RedisModule_CloseKey(kp);
+        return REDISMODULE_OK;
+    }
+
+    VecsHolder* holder = NULL;
+    if(array_len(vecList) == 0){
+        holder = RG_CALLOC(1, sizeof(VecsHolder));
+        vecList = array_append(vecList, holder);
+        holder->vecListPos = 0;
+    }else{
+        holder = vecList[array_len(vecList) - 1];
+    }
+
+    if(holder->size >= VEC_HOLDER_SIZE){
+        // we need to create a new holder
+        holder = RG_CALLOC(1, sizeof(VecsHolder));
+        vecList = array_append(vecList, holder);
+        holder->vecListPos = array_len(vecList) - 1;
+    }
+
+    Vec* v = holder->vectors + holder->size;
+
+    v->keyName = argv[1];
+    RedisModule_RetainString(NULL, v->keyName);
+
+    memcpy(v->vec, data, dataLen);
+
+    v->denom = cblas_snrm2(VEC_SIZE, v->vec, 1);
+
+    VecDT* vDT = RG_CALLOC(1, sizeof(*vDT));
+    vDT->holder = holder;
+    vDT->index = holder->size;
+
+    ++holder->size;
+
+    RedisModule_ModuleTypeSetValue(kp, vecRedisDT, vDT);
+
+    RedisModule_CloseKey(kp);
+
+    RedisModule_ReplicateVerbatim(ctx);
+
+    RedisModule_ReplyWithSimpleString(ctx, "OK");
+
+    return REDISMODULE_OK;
+}
+
+/*
  * rg.vec_sim <k> <prefix> <blob>
  */
 int vec_sim(RedisModuleCtx *ctx, RedisModuleString **argv, int argc){
 
     if(argc != 4){
         return RedisModule_WrongArity(ctx);
-    }
-
-    if(!RedisAI_Initialized){
-        if(RedisAI_Initialize(ctx) != REDISMODULE_OK){
-            RedisModule_ReplyWithError(ctx, "RedisAI is not initialized");
-            return REDISMODULE_OK;
-        }else{
-            RedisModule_Log(ctx, "notice", "RedisAI api loaded successfully for vec sim calculations.");
-            RedisAI_Initialized = true;
-        }
     }
 
     char* err = NULL;
@@ -216,16 +248,12 @@ int vec_sim(RedisModuleCtx *ctx, RedisModuleString **argv, int argc){
         noscan = false;
     }
 
-    DistArg* dArg = RG_ALLOC(sizeof(*dArg));
-    float* data = (float*)RedisModule_StringPtrLen(argv[3], &(dArg->size));
-    if((dArg->size % sizeof(float)) != 0){
-        RG_FREE(dArg);
-        RedisModule_ReplyWithError(ctx, "Given blob is not devided by 4");
+    size_t dataSize;
+    float* data = (float*)RedisModule_StringPtrLen(argv[3], &dataSize);
+    if(dataSize != (VEC_SIZE * sizeof(float))){
+        RedisModule_ReplyWithError(ctx, "Given blob is not at the right size");
         return REDISMODULE_OK;
     }
-    dArg->data = RG_ALLOC(dArg->size);
-    memcpy(dArg->data, data, dArg->size);
-    dArg->size /= sizeof(float);
 
     TopKArg* topKArg1 = RG_ALLOC(sizeof(*topKArg1));
     topKArg1->topK = topK;
@@ -234,13 +262,9 @@ int vec_sim(RedisModuleCtx *ctx, RedisModuleString **argv, int argc){
     topKArg2->topK = topK;
 
 
-    FlatExecutionPlan* fep = RGM_CreateCtx(KeysReader, &err);
+    FlatExecutionPlan* fep = RGM_CreateCtx(VecReader, &err);
 
-    KeysReaderCtx* rCtx = RedisGears_KeysReaderCtxCreate(p, false, NULL, noscan);
-
-    RGM_KeysReaderSetReadRecordCallback(rCtx, read_vector);
-
-    RGM_Map(fep, calculate_dist, dArg);
+    VecReaderCtx* rCtx = VecReaderCtx_Create(data);
 
     RGM_Accumulate(fep, top_k, topKArg1);
 
@@ -286,29 +310,30 @@ static void TensorRecord_RecordFree(Record* base){
     TensorRecord* t = (TensorRecord*)base;
     RedisAI_TensorFree(t->tensor);
     if(t->key){
-        RG_FREE(t->key);
+        RedisModule_FreeString(NULL, t->key);
     }
 }
 
 static int ScoreRecord_SendReply(Record* base, RedisModuleCtx* rctx){
     ScoreRecord* sr = (ScoreRecord*)base;
     RedisModule_ReplyWithArray(rctx, 2);
-    RedisModule_ReplyWithCString(rctx, sr->key);
+    RedisModule_ReplyWithString(rctx, sr->key);
     RedisModule_ReplyWithDouble(rctx, sr->score);
     return REDISMODULE_OK;
 }
 
 static int ScoreRecord_RecordSerialize(ExecutionCtx* ctx, Gears_BufferWriter* bw, Record* base){
     ScoreRecord* sr = (ScoreRecord*)base;
-    RedisGears_BWWriteString(bw, sr->key);
+    const char* keyStr = RedisModule_StringPtrLen(sr->key, NULL);
+    RedisGears_BWWriteString(bw, keyStr);
     RedisGears_BWWriteBuffer(bw, (char*)(&(sr->score)), sizeof(sr->score));
     return REDISMODULE_OK;
 }
 
 static Record* ScoreRecord_RecordDeserialize(ExecutionCtx* ctx, Gears_BufferReader* br){
     ScoreRecord* sr = (ScoreRecord*)RedisGears_RecordCreate(ScoreRecordType);
-    sr->key = RedisGears_BRReadString(br);
-    sr->key = RG_STRDUP(sr->key);
+    const char* keyStr = RedisGears_BRReadString(br);
+    sr->key = RedisModule_CreateString(NULL, keyStr, strlen(keyStr));
     size_t len;
     char* data = RedisGears_BRReadBuffer(br, &len);
     RedisModule_Assert(len == sizeof(double));
@@ -320,7 +345,7 @@ static Record* ScoreRecord_RecordDeserialize(ExecutionCtx* ctx, Gears_BufferRead
 static void ScoreRecord_RecordFree(Record* base){
     ScoreRecord* sr = (ScoreRecord*)base;
     if(sr->key){
-        RG_FREE(sr->key);
+        RedisModule_FreeString(NULL, sr->key);
     }
 
 }
@@ -343,43 +368,6 @@ static Record* HeapRecord_Deserialize(ExecutionCtx* ctx, Gears_BufferReader* br)
 static void HeapRecord_Free(Record* base){
     HeapRecord* hr = (HeapRecord*)base;
     mmh_free(hr->heap);
-}
-
-static void InputTensor_ObjectFree(void* arg){
-    DistArg* blob = arg;
-    RG_FREE(blob->data);
-    RG_FREE(blob);
-}
-
-static void* InputTensor_ArgDuplicate(void* arg){
-    DistArg* blob = arg;
-    DistArg* dArg = RG_ALLOC(sizeof(*dArg));
-    dArg->data = RG_ALLOC(blob->size * sizeof(float));
-    memcpy(dArg->data, blob->data, blob->size * sizeof(float));
-    dArg->size = blob->size;
-    return dArg;
-}
-
-static int InputTensor_ArgSerialize(FlatExecutionPlan* fep, void* arg, Gears_BufferWriter* bw, char** err){
-    DistArg* blob = arg;
-    RedisGears_BWWriteBuffer(bw, (char*)(blob->data), blob->size * sizeof(float));
-    return REDISMODULE_OK;
-}
-
-static void* InputTensor_ArgDeserialize(FlatExecutionPlan* fep, Gears_BufferReader* br, int version, char** err){
-    DistArg* dArg = RG_ALLOC(sizeof(*dArg));
-
-    size_t dLen;
-    float* data = (float*)RedisGears_BRReadBuffer(br, &dLen);
-    dArg->data = RG_ALLOC(dLen);
-    memcpy(dArg->data, data, dLen);
-    dArg->size = dLen / sizeof(float);
-
-    return dArg;
-}
-
-static char* InputTensor_ArgToString(void* arg){
-    return RG_STRDUP("I am dist argument :)");
 }
 
 static void TopKArg_ObjectFree(void* arg){
@@ -415,18 +403,140 @@ static char* TopKArg_ArgToString(void* arg){
 #define VS_PLUGIN_NAME "VECTOR_SIM"
 #define REDISGEARSJVM_PLUGIN_VERSION 1
 
+#define VEC_TYPE_VERSION 1
+
+static void* VecDT_Load(RedisModuleIO *rdb, int encver){
+
+}
+
+static void VecDT_Save(RedisModuleIO *rdb, void *value){
+
+}
+
+static void VecDT_Free(void *value){
+//    VecDT* vDT = value;
+//    Vec* vec = vDT->holder->vectors + vDT->index;
+//
+//    RedisModule_FreeString(NULL, vec->keyName);
+//
+//    // get the last vector
+//    VecsHolder* lastVH = vecList[array_len(vecList) - 1];
+//    Vec* lastVec = lastVH->vectors + lastVH->size;
+//
+//    if(vec == lastVec){
+//        // we are deleting the last vec, we just need to reduce the holder size
+//        --lastVH->size;
+//    }else{
+//        vec->vec = lastVec->vec;
+//        vec->keyName = lastVec->keyName;
+//    }
+
+}
+
+static Record* VecReader_Next(ExecutionCtx* rctx, void* ctx){
+    VecReaderCtx* readerCtx = ctx;
+    RedisModuleCtx* redisCtx = RedisGears_GetRedisModuleCtx(rctx);
+    if(array_len(readerCtx->pendings) > 0){
+        return array_pop(readerCtx->pendings);
+    }
+
+    RedisGears_LockHanlderAcquire(redisCtx);
+
+    const float* b1 = readerCtx->vec;
+    float denom_a = readerCtx->denom_vec;
+
+    while(readerCtx->index < array_len(vecList)){
+        VecsHolder* holder = vecList[readerCtx->index++];
+
+        for(size_t i = 0 ; i < holder->size ; ++i){
+            Vec* v = holder->vectors + i;
+            const float* b2 = v->vec;
+            float dot = cblas_dsdot(VEC_SIZE, b1, 1, b2, 1);
+
+            double score = dot / (denom_a * v->denom) ;
+            ScoreRecord* s = (ScoreRecord*)RedisGears_RecordCreate(ScoreRecordType);
+            s->key = v->keyName;
+            RedisModule_RetainString(NULL, s->key);
+            s->score = score;
+
+            readerCtx->pendings = array_append(readerCtx->pendings, &s->baseRecord);
+        }
+
+        if(array_len(readerCtx->pendings) > 0){
+            RedisGears_LockHanlderRelease(redisCtx);
+            return array_pop(readerCtx->pendings);
+        }
+    }
+
+    RedisGears_LockHanlderRelease(redisCtx);
+
+    return NULL;
+}
+
+static void VecReader_Free(void* ctx){
+    VecReaderCtx_Free(ctx);
+}
+
+static int VecReader_Serialize(ExecutionCtx* ectx, void* ctx, Gears_BufferWriter* bw){
+    VecReaderCtx* readerCtx = ctx;
+    RedisGears_BWWriteBuffer(bw, (char*)readerCtx->vec, VEC_SIZE);
+    return REDISMODULE_OK;
+}
+
+static int VecReader_Deserialize(ExecutionCtx* ectx, void* ctx, Gears_BufferReader* br){
+    VecReaderCtx* readerCtx = ctx;
+    size_t dataLen;
+    float* data = (float*)RedisGears_BRReadBuffer(br, &dataLen);
+    RedisModule_Assert(dataLen == VEC_SIZE * sizeof(*data));
+
+    memcpy(readerCtx->vec, data, VEC_SIZE * sizeof(*data));
+    readerCtx->denom_vec = cblas_snrm2(VEC_SIZE, readerCtx->vec, 1);
+
+    return REDISMODULE_OK;
+}
+
+static Reader* VecReader_CreateReaderCallback(void* arg){
+    VecReaderCtx* ctx = arg;
+    if(!ctx){
+        ctx = VecReaderCtx_Create(NULL);
+    }
+    Reader* r = RG_ALLOC(sizeof(*r));
+    *r = (Reader){
+        .ctx = ctx,
+        .next = VecReader_Next,
+        .free = VecReader_Free,
+        .serialize = VecReader_Serialize,
+        .deserialize = VecReader_Deserialize,
+    };
+    return r;
+}
+
+RedisGears_ReaderCallbacks VecReader = {
+        .create = VecReader_CreateReaderCallback,
+};
+
 int RedisGears_OnLoad(RedisModuleCtx *ctx) {
     if(RedisGears_InitAsGearPlugin(ctx, VS_PLUGIN_NAME, REDISGEARSJVM_PLUGIN_VERSION) != REDISMODULE_OK){
         RedisModule_Log(ctx, "warning", "Failed initialize RedisGears API");
         return REDISMODULE_ERR;
     }
 
-    if(RedisAI_Initialize(ctx) == REDISMODULE_OK){
-        RedisModule_Log(ctx, "notice", "RedisAI api loaded successfully for vec sim calculations.");
-        RedisAI_Initialized = true;
+    vecList = array_new(VecsHolder*, 10);
+    RedisModuleTypeMethods vecDT = {
+        .version = REDISMODULE_TYPE_METHOD_VERSION,
+        .rdb_load = VecDT_Load,
+        .rdb_save = VecDT_Save,
+        .free = VecDT_Free,
+    };
+
+    vecRedisDT = RedisModule_CreateDataType(ctx, "vec_index", VEC_TYPE_VERSION, &vecDT);
+    if (vecRedisDT == NULL) {
+        RedisModule_Log(ctx, "error", "Could not create vector type");
+        return REDISMODULE_ERR;
     }
 
-    RGM_KeysReaderRegisterReadRecordCallback(read_vector);
+//    RGM_KeysReaderRegisterReadRecordCallback(read_vector);
+    RGM_RegisterReader(VecReader);
 
     tensorRecordType = RedisGears_RecordTypeCreate("TensorRecord",
                                                    sizeof(TensorRecord),
@@ -449,14 +559,6 @@ int RedisGears_OnLoad(RedisModuleCtx *ctx) {
                                                  HeapRecord_Deserialize,
                                                  HeapRecord_Free);
 
-    ArgType* InputTensorType = RedisGears_CreateType("InputTensorType",
-                                                     InputTensorTypeVersion,
-                                                     InputTensor_ObjectFree,
-                                                     InputTensor_ArgDuplicate,
-                                                     InputTensor_ArgSerialize,
-                                                     InputTensor_ArgDeserialize,
-                                                     InputTensor_ArgToString);
-
     ArgType* TopKType = RedisGears_CreateType("TopKType",
                                               TopKTypeVersion,
                                               TopKArg_ObjectFree,
@@ -466,11 +568,15 @@ int RedisGears_OnLoad(RedisModuleCtx *ctx) {
                                               TopKArg_ArgToString);
 
     RGM_RegisterMap(to_score_records, NULL);
-    RGM_RegisterMap(calculate_dist, InputTensorType);
     RGM_RegisterAccumulator(top_k, TopKType);
 
     if (RedisModule_CreateCommand(ctx, "rg.vec_sim", vec_sim, "readonly", 0, 0, 0) != REDISMODULE_OK) {
         RedisModule_Log(ctx, "warning", "could not register command rg.vec_sim");
+        return REDISMODULE_ERR;
+    }
+
+    if (RedisModule_CreateCommand(ctx, "rg.vec_add", vec_add, "readonly", 1, 1, 1) != REDISMODULE_OK) {
+        RedisModule_Log(ctx, "warning", "could not register command rg.vec_add");
         return REDISMODULE_ERR;
     }
 
