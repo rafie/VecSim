@@ -38,13 +38,6 @@ make
 make install
 ```
 
-* On macOS install Xcode command line tools:
-
-
-```
-xcode-select --install
-```
-
 ## Build and Run
 ### Clone
 To get the code and its submodules, do the following:
