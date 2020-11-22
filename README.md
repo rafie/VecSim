@@ -1,5 +1,5 @@
 # VecSim
-Calculate vector similarity over Redis cluster
+Calculate vector similarity over Redis cluster using [Cosine similarity](https://en.wikipedia.org/wiki/Cosine_similarity).
 
 # Build and Run
 ## Prerequisites
@@ -53,6 +53,7 @@ git submodule update --init --recursive
 
 ### Build and Run
 Inside the VecSim directory run `make Run` to build and Run
+
 **Important:** `make Run` will download a compiled version of RedisGears so an internet connection is required.
 
 ## Testing
@@ -64,4 +65,43 @@ Inside the VecSim directory run `make Run` to build and Run
 
 ### Run the tests
 Inside the VecSim directory run `make Tests`
+
 **Important:** `make Tests` will download a compiled version of RedisGears so an internet connection is required.
+
+# API
+## RG.VEC_ADD
+This command is used to add a new vector to Redis
+### Redis API
+```
+RG.VEC_ADD <key> <vector>
+```
+Arguments:
+
+* key - the key to put the vector in
+* vector - byte representation of float vector of size 128
+
+Example (using redis-py client):
+```Python
+import redis
+import numpy as np
+conn = redis.Redis()
+conn.execute_command('RG.VEC_ADD', 'key', np.random.rand(1, 128).astype(np.float32).tobytes())
+```
+## RG.VEC_SIM
+This command is used to return the k closest vector of a give vector (using [Cosine similarity](https://en.wikipedia.org/wiki/Cosine_similarity))
+### Redis API
+```
+RG.VEC_ADD <k> <vector>
+```
+Arguments:
+
+* k - the amount of vectors to return
+* vector - byte representation of float vector of size 128
+
+Example (using redis-py client):
+```Python
+import redis
+import numpy as np
+blob = np.random.rand(1, 128).astype(np.float32)
+res = r.execute_command('RG.VEC_SIM', '4', blob.tobytes()) # return the 4 closest vectors to blob
+```
