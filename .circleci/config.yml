@@ -41,8 +41,8 @@ jobs:
         - run:
             name: Setup executor
             command: |
-              yum -qq update
-              yum -q install -y git openssh-client curl ca-certificates make tar gzip python3-dev unzip
+              yum update -y
+              yum install -y git openssh-client curl ca-certificates make tar gzip python3-dev unzip
         - checkout
         - setup-automation
         - run:
