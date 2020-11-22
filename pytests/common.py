@@ -78,3 +78,8 @@ def DecoratorTest(testFunc):
         }
         testFunc(**kargs)
     return TestFunc
+
+def decodeStr(s):
+    if type(s) == str:
+        return s
+    return s.decode('ascii')

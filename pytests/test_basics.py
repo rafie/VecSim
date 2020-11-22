@@ -1,4 +1,4 @@
-from common import DecoratorTest
+from common import DecoratorTest, decodeStr
 import numpy as np
 from scipy import spatial
 
@@ -23,7 +23,7 @@ def test_basic(env, conn):
 
 	redisKeys = conn.execute_command('RG.VEC_SIM', '4', targetVector.tobytes())
 
-	redisKeys = sorted([k.decode('ascii') for k, _ in redisKeys[0]])
+	redisKeys = sorted([decodeStr(k) for k, _ in redisKeys[0]])
 
 	env.assertEqual(keys, redisKeys)
 
@@ -63,7 +63,7 @@ def test_delete(env, conn):
 
 	redisKeys = conn.execute_command('RG.VEC_SIM', '80', targetVector.tobytes())
 
-	redisKeys = sorted([k.decode('ascii') for k, _ in redisKeys[0]])
+	redisKeys = sorted([decodeStr(k) for k, _ in redisKeys[0]])
 
 	env.assertEqual(keys, redisKeys)
 
@@ -115,7 +115,7 @@ def test_rdbLoadAndSave(env, conn):
 		
 		redisKeys = conn.execute_command('RG.VEC_SIM', '4', targetVector.tobytes())
 
-		redisKeys = sorted([k.decode('ascii') for k, _ in redisKeys[0]])
+		redisKeys = sorted([decodeStr(k) for k, _ in redisKeys[0]])
 
 		env.assertEqual(keys, redisKeys)
 
@@ -132,7 +132,7 @@ def test_dumpRestor(env, conn):
 	res = conn.execute_command('RG.VEC_SIM', '4', vec.tobytes())[0]
 
 	env.assertEqual(len(res), 1)
-	env.assertEqual(res[0][0].decode('ascii'), 'key')
+	env.assertEqual(decodeStr(res[0][0]), 'key')
 	env.assertLessEqual(1 - float(res[0][1]), 0.00001)
 
 @DecoratorTest
