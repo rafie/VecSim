@@ -68,7 +68,7 @@ def getConnectionByEnv(env):
 
 def DecoratorTest(testFunc):
     def TestFunc():
-        testName = 'gears_tests.%s' % testFunc.__name__
+        testName = 'vecsim_tests.%s' % testFunc.__name__
         print(Colors.Cyan('\tRunning: %s' % testName))
         env = Env(testName = testName)
         conn = getConnectionByEnv(env)
