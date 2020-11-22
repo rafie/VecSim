@@ -4,6 +4,7 @@ Calculate vector similarity over Redis cluster using [Cosine similarity](https:/
 # Build and Run
 ## Prerequisites
 * Install git
+
 for Debian like systems:
 ```
 apt-get install git
@@ -15,6 +16,7 @@ yum install git
 
 
 * Install the build-essential package, or its equivalent, on your system:
+
 for Debian-like systems:
 ```
 apt-get install build-essential
@@ -37,6 +39,7 @@ make install
 ```
 
 * On macOS install Xcode command line tools:
+
 
 ```
 xcode-select --install
