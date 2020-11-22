@@ -28,7 +28,7 @@ yum install -y devtoolset-8
 scl enable devtoolset-8 bash
 ```
 
-* Install [Redis 6.0.1 or higher](https://redis.io/) on your machine.
+* Install [Redis 6.0.9 or higher](https://redis.io/) on your machine.
 
 ```
 git clone https://github.com/redis/redis.git
