@@ -1,5 +1,5 @@
 # VecSim
-Calculate vector similarity over Redis cluster (using [RedisGears](https://oss.redislabs.com/redisgears/)) using [Cosine similarity](https://en.wikipedia.org/wiki/Cosine_similarity).
+Calculate vector similarity over Redis cluster (using [RedisGears](https://oss.redislabs.com/redisgears/)). The distance calculation is based on [Cosine similarity](https://en.wikipedia.org/wiki/Cosine_similarity).
 
 # Build and Run
 ## Prerequisites
