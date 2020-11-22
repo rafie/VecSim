@@ -23,7 +23,7 @@ def test_basic(env, conn):
 
 	redisKeys = conn.execute_command('RG.VEC_SIM', '4', targetVector.tobytes())
 
-	redisKeys = sorted([k for k, _ in redisKeys[0]])
+	redisKeys = sorted([k.decode('ascii') for k, _ in redisKeys[0]])
 
 	env.assertEqual(keys, redisKeys)
 
@@ -51,7 +51,7 @@ def test_delete(env, conn):
 
 	vectors = [vectors[i] for i in range(1, len(vectors), 2)]
 
-	env.expect('RG.PYEXECUTE', "GB('ShardsIDReader').map(lambda x: int(execute('dbsize'))).aggregate(0, lambda a, x: a + x, lambda a, x: a + x).run()").equal([[str(len(vectors))],[]])
+	env.expect('RG.PYEXECUTE', "GB('ShardsIDReader').map(lambda x: int(execute('dbsize'))).aggregate(0, lambda a, x: a + x, lambda a, x: a + x).run()").equal([[str(len(vectors)).encode()],[]])
 
 	# calculating dist
 	dists = [(1 - spatial.distance.cosine(targetVector[0], v[0]), k) for k, v in vectors]
@@ -63,7 +63,7 @@ def test_delete(env, conn):
 
 	redisKeys = conn.execute_command('RG.VEC_SIM', '80', targetVector.tobytes())
 
-	redisKeys = sorted([k for k, _ in redisKeys[0]])
+	redisKeys = sorted([k.decode('ascii') for k, _ in redisKeys[0]])
 
 	env.assertEqual(keys, redisKeys)
 
@@ -83,7 +83,7 @@ def test_flush(env, conn):
 
 	conn.flushall()
 
-	env.expect('RG.PYEXECUTE', "GB('ShardsIDReader').map(lambda x: int(execute('dbsize'))).aggregate(0, lambda a, x: a + x, lambda a, x: a + x).run()").equal([['0'],[]])
+	env.expect('RG.PYEXECUTE', "GB('ShardsIDReader').map(lambda x: int(execute('dbsize'))).aggregate(0, lambda a, x: a + x, lambda a, x: a + x).run()").equal([[b'0'],[]])
 
 @DecoratorTest
 def test_rdbLoadAndSave(env, conn):
@@ -115,7 +115,7 @@ def test_rdbLoadAndSave(env, conn):
 		
 		redisKeys = conn.execute_command('RG.VEC_SIM', '4', targetVector.tobytes())
 
-		redisKeys = sorted([k for k, _ in redisKeys[0]])
+		redisKeys = sorted([k.decode('ascii') for k, _ in redisKeys[0]])
 
 		env.assertEqual(keys, redisKeys)
 
@@ -132,7 +132,7 @@ def test_dumpRestor(env, conn):
 	res = conn.execute_command('RG.VEC_SIM', '4', vec.tobytes())[0]
 
 	env.assertEqual(len(res), 1)
-	env.assertEqual(res[0][0], 'key')
+	env.assertEqual(res[0][0].decode('ascii'), 'key')
 	env.assertLessEqual(1 - float(res[0][1]), 0.00001)
 
 @DecoratorTest

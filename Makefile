@@ -22,11 +22,11 @@ Run: Install
 	PluginsDirectory ./src/
 	
 Tests: Install
-	RLTest -t ./pytests --module ./bin/RedisGears/redisgears.so --module-args "CreateVenv 1 pythonInstallationDir ../bin/RedisGears/ \
+	python3 -m RLTest -t ./pytests --module ./bin/RedisGears/redisgears.so --module-args "CreateVenv 1 pythonInstallationDir ../bin/RedisGears/ \
 	PluginsDirectory ../src/" --clear-logs
-	RLTest -t ./pytests --module ./bin/RedisGears/redisgears.so --module-args "CreateVenv 1 pythonInstallationDir ../bin/RedisGears/ \
+	python3 -m RLTest -t ./pytests --module ./bin/RedisGears/redisgears.so --module-args "CreateVenv 1 pythonInstallationDir ../bin/RedisGears/ \
 	PluginsDirectory ../src/" --clear-logs --env oss-cluster --shards-count 1
-	RLTest -t ./pytests --module ./bin/RedisGears/redisgears.so --module-args "CreateVenv 1 pythonInstallationDir ../bin/RedisGears/ \
+	python3 -m RLTest -t ./pytests --module ./bin/RedisGears/redisgears.so --module-args "CreateVenv 1 pythonInstallationDir ../bin/RedisGears/ \
 	PluginsDirectory ../src/" --clear-logs --env oss-cluster --shards-count 2
-	RLTest -t ./pytests --module ./bin/RedisGears/redisgears.so --module-args "CreateVenv 1 pythonInstallationDir ../bin/RedisGears/ \
+	python3 -m RLTest -t ./pytests --module ./bin/RedisGears/redisgears.so --module-args "CreateVenv 1 pythonInstallationDir ../bin/RedisGears/ \
 	PluginsDirectory ../src/" --clear-logs --env oss-cluster --shards-count 3
