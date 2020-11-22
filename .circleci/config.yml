@@ -9,6 +9,7 @@ commands:
             git submodule update --init --recursive
             ./deps/readies/bin/getpy3
             python3 ./deps/readies/bin/system-setup.py
+            python3 -m pip install semantic_version
 
 jobs:
   build-and-test-bionic:
@@ -42,7 +43,8 @@ jobs:
             name: Setup executor
             command: |
               yum update -y
-              yum install -y git openssh-client curl ca-certificates make tar gzip python3-dev unzip
+              yum install -y git openssh-client curl ca-certificates make tar gzip python3-devel.x86_64 unzip centos-release-scl devtoolset-8
+              scl enable devtoolset-8 bash
         - checkout
         - setup-automation
         - run:
