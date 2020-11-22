@@ -1,0 +1,41 @@
+version: 2.1
+
+commands: 
+  setup-executor:
+    steps:
+      - run:
+          name: Setup executor
+          command: |
+            apt-get -qq update
+            apt-get -q install -y git openssh-client curl ca-certificates make tar gzip
+            bash <(curl -fsSL https://get.docker.com)
+      - setup_remote_docker:
+          docker_layer_caching: true
+  setup-automation:
+    steps:
+      - run:
+          name: Setup automation
+          command: |
+            ./deps/readies/bin/getpy3
+            ./sbin/system-setup.py
+
+build-and-test:
+    docker:
+      - image: 'ubuntu:bionic'
+    steps:
+      - setup-executor
+      - checkout
+      - setup-automation
+      - run:
+          name: Install Redis
+          command: ./deps/readies/bin/getredis --version 6
+      - run:
+          name: Tests
+          command: make Tests
+
+workflows:
+  version: 2
+  commit:
+    jobs:
+      - build-and-test:
+          <<: *on-any-branch
