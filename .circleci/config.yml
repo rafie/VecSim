@@ -9,7 +9,6 @@ commands:
             git submodule update --init --recursive
             ./deps/readies/bin/getpy3
             python3 ./deps/readies/bin/system-setup.py
-            python3 -m pip install semantic_version
 
 jobs:
   build-and-test-bionic:
@@ -42,14 +41,23 @@ jobs:
         - run:
             name: Setup executor
             command: |
-              yum update -y
-              yum install -y git openssh-client curl ca-certificates make tar gzip python3-devel.x86_64 unzip centos-release-scl devtoolset-8
-              scl enable devtoolset-8 bash
+              yum install -y git openssh-client curl ca-certificates make tar gzip python3-devel.x86_64 unzip
+        - run:
+            name: Install centos-release-scl
+            command: |
+              yum install -y centos-release-scl devtoolset-8
+        - run:
+            name: Install gcc 8
+            command: |
+              yum install -y devtoolset-8
         - checkout
         - setup-automation
         - run:
+            name: Install semantic_version
+            command: python3 -m pip install --no-cache-dir semantic_version
+        - run:
             name: Install Redis
-            command: ./deps/readies/bin/getredis --version 6
+            command: . /opt/rh/devtoolset-8/enable; ./deps/readies/bin/getredis --version 6
         - run:
             name: Install RLTest
             command: python3 -m pip install --no-cache-dir git+https://github.com/RedisLabsModules/RLTest.git@master
@@ -58,7 +66,7 @@ jobs:
             command: python3 -m pip install --no-cache-dir numpy scipy
         - run:
             name: Tests
-            command: make Tests
+            command: . /opt/rh/devtoolset-8/enable; make Tests
 
 on-any-branch: &on-any-branch
   filters:
