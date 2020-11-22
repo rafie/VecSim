@@ -17,7 +17,7 @@ commands:
           name: Setup automation
           command: |
             ./deps/readies/bin/getpy3
-            ./sbin/system-setup.py
+            python3 ./deps/readies/sbin/system-setup.py
 
 build-and-test:
     docker:
@@ -32,6 +32,13 @@ build-and-test:
       - run:
           name: Tests
           command: make Tests
+
+on-any-branch: &on-any-branch
+  filters:
+    branches:
+      only: /.*/
+    tags:
+      only: /.*/
 
 workflows:
   version: 2
