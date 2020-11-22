@@ -1,13 +1,6 @@
 version: 2.1
 
 commands: 
-  setup-executor:
-    steps:
-      - run:
-          name: Setup executor
-          command: |
-            apt-get -qq update
-            apt-get -q install -y git openssh-client curl ca-certificates make tar gzip python3-dev unzip
   setup-automation:
     steps:
       - run:
@@ -18,11 +11,38 @@ commands:
             python3 ./deps/readies/bin/system-setup.py
 
 jobs:
-  build-and-test:
+  build-and-test-bionic:
       docker:
         - image: 'ubuntu:bionic'
       steps:
-        - setup-executor
+        - run:
+            name: Setup executor
+            command: |
+              apt-get -qq update
+              apt-get -q install -y git openssh-client curl ca-certificates make tar gzip python3-dev unzip
+        - checkout
+        - setup-automation
+        - run:
+            name: Install Redis
+            command: ./deps/readies/bin/getredis --version 6
+        - run:
+            name: Install RLTest
+            command: python3 -m pip install --no-cache-dir git+https://github.com/RedisLabsModules/RLTest.git@master
+        - run:
+            name: Install Tests deps
+            command: python3 -m pip install --no-cache-dir numpy scipy
+        - run:
+            name: Tests
+            command: make Tests
+  build-and-test-centos:
+      docker:
+        - image: 'centos:centos7'
+      steps:
+        - run:
+            name: Setup executor
+            command: |
+              yum -qq update
+              yum -q install -y git openssh-client curl ca-certificates make tar gzip python3-dev unzip
         - checkout
         - setup-automation
         - run:
@@ -49,5 +69,7 @@ workflows:
   version: 2
   commit:
     jobs:
-      - build-and-test:
+      - build-and-test-bionic:
+          <<: *on-any-branch
+      - build-and-test-centos:
           <<: *on-any-branch

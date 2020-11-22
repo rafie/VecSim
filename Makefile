@@ -1,3 +1,6 @@
+OS=$(shell ./deps/readies/bin/platform --osnick)
+$(info OS=$(OS))
+
 all: OpenBLAS VecSim
 
 ./deps/OpenBLAS/libopenblas.a:
@@ -13,7 +16,7 @@ clean:
 	make -C ./src/ clean
 	
 InstallRedisGears:
-	/bin/bash ./Install_RedisGears.sh
+	OS=$(OS) /bin/bash ./Install_RedisGears.sh
 
 Install: all InstallRedisGears
 

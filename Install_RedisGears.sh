@@ -1,6 +1,14 @@
+if [ -z ${OS+x} ]
+then
+      echo "os is not set"
+      exit 1
+fi
+
+echo "installing redisgears for :" $OS
+
 WORK_DIR=./bin/RedisGears/
-REDISGEARS_ZIP=redisgears.linux-bionic-x64.master.zip
-REDISGEARS_DEPS=redisgears-dependencies.linux-bionic-x64.master.tgz
+REDISGEARS_ZIP=redisgears.linux-$OS-x64.master.zip
+REDISGEARS_DEPS=redisgears-dependencies.linux-$OS-x64.master.tgz
 REDISGEARS_S3_PATH=http://redismodules.s3.amazonaws.com/redisgears/snapshots/$REDISGEARS_ZIP
 REDISGEARS_DEPS_S3_PATH=http://redismodules.s3.amazonaws.com/redisgears/snapshots/$REDISGEARS_DEPS
 
