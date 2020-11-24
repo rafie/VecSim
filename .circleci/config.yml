@@ -84,14 +84,14 @@ workflows:
       - build-and-test-centos:
           <<: *on-any-branch
 
-nightly:
-    triggers:
-      - schedule:
-          cron: "0 0 * * *"
-          filters:
-            branches:
-              only:
-                - master
-    jobs:
-      - build-and-test-bionic
-      - build-and-test-centos
+  nightly:
+      triggers:
+        - schedule:
+            cron: "0 0 * * *"
+            filters:
+              branches:
+                only:
+                  - master
+      jobs:
+        - build-and-test-bionic
+        - build-and-test-centos
