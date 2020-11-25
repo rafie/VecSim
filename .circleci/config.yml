@@ -68,6 +68,18 @@ jobs:
             name: Tests
             command: . /opt/rh/devtoolset-8/enable; make Tests
 
+never: &never
+  filters:
+    branches:
+      ignore: /.*/
+    tags:
+      ignore: /.*/
+
+on-master: &on-master
+  filters:
+    branches:
+      only: master
+
 on-any-branch: &on-any-branch
   filters:
     branches:
@@ -85,13 +97,10 @@ workflows:
           <<: *on-any-branch
 
   nightly:
-      triggers:
-        - schedule:
-            cron: "0 0 * * *"
-            filters:
-              branches:
-                only:
-                  - master
-      jobs:
-        - build-and-test-bionic
-        - build-and-test-centos
+    triggers:
+      - schedule:
+          cron: "0 0 * * *"
+          <<: *on-master
+    jobs:
+      - build-and-test-bionic
+      - build-and-test-centos
